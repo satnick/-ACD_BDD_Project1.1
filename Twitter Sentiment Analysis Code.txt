@@ -1,0 +1,34 @@
+load_tweets = load '/pig_ex/twitter/' using com.twitter.elephantbird.pig.load.JsonLoader('-nestedLoad') AS myMap;
+dump load_tweets;
+
+extract_details = FOREACH load_tweets GENERATE myMap#'id' as id,myMap#'text' as text;
+dump extract_details;
+
+tokens = foreach extract_details generate id, text, FLATTEN(TOKENIZE(text)) as word;
+
+hadoop fs -mkdir /pig_ex/twitter/afinn_data
+hadoop fs -put /home/cloudera/Desktop/Shared/TwitterSentimentalAnalysis/pig_jars/AFINN.txt /pig_ex/twitter/afinn_data/
+
+dictionary = load '/pig_ex/twitter/afinn_data/AFINN.txt' using PigStorage('\t') as (word:chararray, rating:int);
+dump dictionary;
+
+word_rating = join tokens by word left outer, dictionary by word using 'replicated';
+describe word_rating;
+> word_rating: {tokens::id: bytearray,tokens::text: bytearray,tokens::word: chararray,dictionary::word: chararray,dictionary::rating: int}
+
+rating = foreach word_rating generate tokens::id as id,tokens::text as text, dictionary::rating as rate;
+describe rating;
+> rating: {id: bytearray,text: bytearray,rate: int}
+
+
+word_group = group rating by (id,text);
+describe word_group;
+> word_group: {group: (id: bytearray,text: bytearray),rating: {(id: bytearray,text: bytearray,rate: int)}}
+
+
+avg_rate = foreach word_group generate group, AVG(rating.rate) as tweet_rating;
+dump avg_rate;
+
+positive_tweets = filter avg_rate by tweet_rating>=0;
+dump positive_tweets;
+
